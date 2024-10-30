@@ -19,9 +19,8 @@
 
 #include <mcp_can.h>
 #include <SPI.h>
-#include <pubsubClient.h>
+#include <PubSubClient.h>
 #include <Ticker.h>
-
 #include <ESP8266WiFi.h>
 
 // Serial TX Variables
@@ -59,6 +58,7 @@ byte tpoBuf8[8];
 double temp = 0;
 double range = 0;
 double soc = 0;
+double ctemp = 0;
 double amps = 0;
 double key = 0;
 double odo = 0;
@@ -85,6 +85,7 @@ float ChargeDCV;
 float ChargeDCA;
 float ChargeACV;
 float ChargeACA;
+float celltemp;
 
 // Serial Output String Buffer
 char msgString[128];
@@ -115,12 +116,17 @@ const long timeoutTime = 2000;
 #define MQTT_PUB_TEMP12 "tele/CAN/ChargeDCA"
 #define MQTT_PUB_TEMP13 "tele/CAN/ChargeACV"
 #define MQTT_PUB_TEMP14 "tele/CAN/ChargeACA"
-
-AsyncMqttClient mqttClient;
-Ticker mqttReconnectTimer;
+#define MQTT_PUB_TEMP15 "tele/CAN/celltemp"
 
 unsigned long previousMillis = 0;  // Stores last time temperature was published
 const long interval = 10000;       // Interval at which to publish sensor readings
+WiFiClient wifiClient;
+PubSubClient client(wifiClient);
+//MQTT setup
+const char user[] = "uqctrigg";
+const char pass[] = "GqofEFGIW-Rn";
+const char broker[] = "hairdresser.cloudmqtt.com";
+int port = 15745;
 
 void setup() {
   Serial.begin(115200);
@@ -128,21 +134,16 @@ void setup() {
 
   startWifi();
   startCan();
+  //MQTT
+  client.setServer(broker, port);
+  
 
-  mqttClient.onConnect(onMqttConnect);
-  mqttClient.onDisconnect(onMqttDisconnect);
-  //mqttClient.onSubscribe(onMqttSubscribe);
-  //mqttClient.onUnsubscribe(onMqttUnsubscribe);
-  mqttClient.onPublish(onMqttPublish);
-  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
-  // If your broker requires authentication (username and password), set them below
-  mqttClient.setCredentials("uqctrigg", "GqofEFGIW-Rn");
-  connectToMqtt();
-
-  Serial.println("Setup done.");
 }
 
 void loop() {
+
+   if (!client.connected()) reconnect(); // check if client is connected
+  client.loop();
 
   if (!digitalRead(CAN0_INT)) {  // If CAN0_INT pin is low, read receive buffer
     CAN0.readMsgBuf(&rxId, &len, rxBuf);    //SOC
@@ -154,79 +155,57 @@ void loop() {
     CAN0.readMsgBuf(&rxId7, &len, rxBuf7);  //Batt A V W
     CAN0.readMsgBuf(&rxId8, &len, rxBuf8);  //charge A V W
 
-
     // if TPO, read data
     if (rxId == 0x374) {
-
-      // debug:
       for (byte i = 0; i < 7; i++) {
         tpoBuf[i] = rxBuf[i];
       }
-
+      ctemp = rxBuf[6] - 50.0;
       soc = (rxBuf[0] - 10) / 2.0;
       soclevel = soc;
-      //((float *)rxBuf)[7] = soclevel;
-      //soclevel = (socleveltemp - 10) / 2.0;
+      celltemp = ctemp;
     }
     if (rxId2 == 0x286) {
-
-      // debug:
       for (byte i = 0; i < 7; i++) {
         tpoBuf2[i] = rxBuf2[i];
       }
-
       temp = rxBuf2[3] - 50.0;
       templevel = temp;
     }
     if (rxId3 == 0x346) {
-
-      // debug:
       for (byte i = 0; i < 7; i++) {
         tpoBuf3[i] = rxBuf3[i];
       }
-
       range = rxBuf3[7];
       rangekm = range;
     }
     if (rxId4 == 0x384) {
-
-      // debug:
       for (byte i = 0; i < 7; i++) {
         tpoBuf4[i] = rxBuf4[i];
       }
-
       amps = rxBuf4[4] / 10.0;
       amplevel = amps;
     }
     if (rxId5 == 0x412) {
-
-      // debug:
       for (byte i = 0; i < 7; i++) {
         tpoBuf5[i] = rxBuf5[i];
       }
-
       key = rxBuf5[0];
       odo = ((rxBuf5[2] * 256 * 256) + (rxBuf5[3] * 256) + rxBuf5[4]);
       odometer = odo;
       keystate = key;
     }
     if (rxId6 == 0x697) {
-
-      // debug:
       for (byte i = 0; i < 7; i++) {
         tpoBuf6[i] = rxBuf6[i];
       }
-
       QCamps = rxBuf6[2];
       Chademoamps = QCamps;
     }
     if (rxId7 == 0x373) {
-
-      // debug:
       for (byte i = 0; i < 7; i++) {
         tpoBuf7[i] = rxBuf7[i];
       }
-
       BattV = (((rxBuf7[4] * 256) + rxBuf7[5]) / 10);
       BattA = (((rxBuf7[2] * 256) + rxBuf7[3] - 32768) / 100) + 0.66;
       BattW = BattA * BattV;
@@ -235,8 +214,6 @@ void loop() {
       Bwatts = BattW;
     }
     if (rxId8 == 0x389) {
-
-      // debug:
       for (byte i = 0; i < 7; i++) {
         tpoBuf8[i] = rxBuf8[i];
       }
@@ -251,63 +228,46 @@ void loop() {
 
     }
   }
-
-
-  /*// send via serial
-  if(millis() - prevTX >= invlTX) {                    // Send this at a one second interval. 
-    prevTX = millis();
-
-    /*
-    for(byte i = 0; i<7; i++){
-      sprintf(msgString, " 0x%.2X", tpoBuf[i]);
-      Serial.print(msgString);
-    }
-    Serial.println();
-    
-      
-    sprintf(msgString, "temp=%d range=%d%km amps=%dC SoC=%d%%", temp, range, amps, soc);  
-    Serial.println(msgString);
-  }
-  */
   unsigned long currentMillis = millis();
   // Every X number of seconds (interval = 10 seconds)
   // it publishes a new MQTT message
   if (currentMillis - previousMillis >= interval) {
     // Save the last time a new reading was published
     previousMillis = currentMillis;
-    // New temperature readings
-    // Publish an MQTT message on topic esp/ds18b20/temperature
+    // Publish an MQTT message 
     if ((rangekm > 0) && (rangekm < 255)) {
-      mqttClient.publish(MQTT_PUB_TEMP2, 1, true, String(rangekm, 0).c_str());
+      client.publish(MQTT_PUB_TEMP2, String(rangekm, 0).c_str());
     }
     if (soclevel > 0) {
-      mqttClient.publish(MQTT_PUB_TEMP, 1, true, String(soclevel, 0).c_str());
+      client.publish(MQTT_PUB_TEMP, String(soclevel, 0).c_str());
     }
-      mqttClient.publish(MQTT_PUB_TEMP4, 1, true, String(amplevel, 0).c_str());
+      client.publish(MQTT_PUB_TEMP4, String(amplevel, 0).c_str());
     
     if (templevel != 0) {
-      mqttClient.publish(MQTT_PUB_TEMP3, 1, true, String(templevel, 0).c_str());
+      client.publish(MQTT_PUB_TEMP3, String(templevel, 0).c_str());
+    }
+    if (templevel != 0) {
+      client.publish(MQTT_PUB_TEMP15, String(celltemp, 0).c_str());
     }
     if (keystate == 254) {
-      mqttClient.publish(MQTT_PUB_TEMP5, 1, true, "Ready");
+      client.publish(MQTT_PUB_TEMP5, "Ready");
     } else {
-      mqttClient.publish(MQTT_PUB_TEMP5, 1, true, "Off");
+      client.publish(MQTT_PUB_TEMP5, "Off");
     }
     if (odometer != 0) {
-      mqttClient.publish(MQTT_PUB_TEMP6, 1, true, String(odometer, 0).c_str());
+      client.publish(MQTT_PUB_TEMP6, String(odometer, 0).c_str());
     }
-    mqttClient.publish(MQTT_PUB_TEMP7, 1, true, String(Bampers, 0).c_str());
-    mqttClient.publish(MQTT_PUB_TEMP8, 1, true, String(Bvoltage, 0).c_str());
-    mqttClient.publish(MQTT_PUB_TEMP9, 1, true, String(Bwatts, 0).c_str());
-    mqttClient.publish(MQTT_PUB_TEMP10, 1, true, String(Chademoamps, 0).c_str()); 
-    mqttClient.publish(MQTT_PUB_TEMP11, 1, true, String(ChargeDCV, 0).c_str());
-    mqttClient.publish(MQTT_PUB_TEMP12, 1, true, String(ChargeDCA, 0).c_str());
-    mqttClient.publish(MQTT_PUB_TEMP13, 1, true, String(ChargeACV, 0).c_str());
-    mqttClient.publish(MQTT_PUB_TEMP14, 1, true, String(ChargeACA, 0).c_str());
+    client.publish(MQTT_PUB_TEMP7,  String(Bampers, 0).c_str());
+    client.publish(MQTT_PUB_TEMP8,  String(Bvoltage, 0).c_str());
+    client.publish(MQTT_PUB_TEMP9,  String(Bwatts, 0).c_str());
+    client.publish(MQTT_PUB_TEMP10,  String(Chademoamps, 0).c_str()); 
+    client.publish(MQTT_PUB_TEMP11,  String(ChargeDCV, 0).c_str());
+    client.publish(MQTT_PUB_TEMP12,  String(ChargeDCA, 0).c_str());
+    client.publish(MQTT_PUB_TEMP13,  String(ChargeACV, 0).c_str());
+    client.publish(MQTT_PUB_TEMP14,  String(ChargeACA, 0).c_str());
 
   }
 
-  //handleWeb();
 }
 
 void startWifi() {
@@ -321,9 +281,6 @@ void startWifi() {
 
   Serial.print("Connected, IP address: ");
   Serial.println(WiFi.localIP());
-
-  //server.begin();
-  //Serial.println("Webserver started.");
 }
 
 void startCan() {
@@ -335,72 +292,20 @@ void startCan() {
   CAN0.setMode(MCP_NORMAL);
   pinMode(CAN0_INT, INPUT);  // Configuring pin for /INT input
 }
-
-/*String getHtmlPage() {
-  sprintf(msgString, "temp=%d range=%d%% amps=%dC SoC=%d%%", temp, range, amps, soc);
-  String htmlPage =
-     String("HTTP/1.1 200 OK\r\n") +
-            "Content-Type: text/html\r\n" +
-            "Connection: close\r\n" +  // the connection will be closed after completion of the response
-            // "Refresh: 5\r\n" +  // refresh the page automatically every 5 sec
-            "\r\n" +
-            "<!DOCTYPE HTML>" +
-            "<html>" + msgString + "</html>" +
-            "\r\n";
-  return htmlPage;
-}
-
-void handleWeb() {
-  WiFiClient client = server.available();
-  // wait for a client (web browser) to connect
-  if (client) {
-    Serial.println("\n[Client connected]");
-    currentTime = millis();
-    previousTime = currentTime;
-    while (client.connected() && currentTime - previousTime <= timeoutTime) {
-       currentTime = millis(); 
-      // read line by line what the client (web browser) is requesting
-      if (client.available())
-      {
-        String line = client.readStringUntil('\r');
-        Serial.print(line);
-        // wait for end of client's request, that is marked with an empty line
-        if (line.length() == 1 && line[0] == '\n')
-        {
-          client.println(getHtmlPage());
-          break;
-        }
-      }
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    String clientId = "CanBridge";   // Create a random client ID
+    clientId += String(random(0xffff), HEX);
+    // Attempt to connect
+    if (client.connect(clientId.c_str(), user, pass)) {
+      Serial.println("connected");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");   // Wait 5 seconds before retrying
+      delay(5000);
     }
-    delay(10); // give the web browser time to receive the data
-
-    // close the connection:
-    client.stop();
-    Serial.println("[Client disonnected]");
   }
-}
-*/
-void connectToMqtt() {
-  Serial.println("Connecting to MQTT...");
-  mqttClient.connect();
-}
-
-void onMqttConnect(bool sessionPresent) {
-  Serial.println("Connected to MQTT.");
-  Serial.print("Session present: ");
-  Serial.println(sessionPresent);
-}
-
-void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
-  Serial.println("Disconnected from MQTT.");
-
-  if (WiFi.isConnected()) {
-    mqttReconnectTimer.once(2, connectToMqtt);
-  }
-}
-
-void onMqttPublish(uint16_t packetId) {
-  Serial.print("Publish acknowledged.");
-  Serial.print("  packetId: ");
-  Serial.println(packetId);
 }
