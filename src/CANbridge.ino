@@ -164,6 +164,10 @@ void loop() {
       soc = (rxBuf[0] - 10) / 2.0;
       soclevel = soc;
       celltemp = ctemp;
+      Serial.println(rxBuf[6]);
+      Serial.println(rxBuf[5]);
+      Serial.println(ctemp);
+      Serial.println(celltemp);
     }
     if (rxId2 == 0x286) {
       for (byte i = 0; i < 7; i++) {
@@ -296,7 +300,7 @@ void reconnect() {
   // Loop until we're reconnected
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
-    String clientId = "CanBridge";   // Create a random client ID
+    String clientId = "CanBridge-";   // Create a random client ID
     clientId += String(random(0xffff), HEX);
     // Attempt to connect
     if (client.connect(clientId.c_str(), user, pass)) {
