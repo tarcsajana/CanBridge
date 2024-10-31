@@ -160,14 +160,10 @@ void loop() {
       for (byte i = 0; i < 7; i++) {
         tpoBuf[i] = rxBuf[i];
       }
-      ctemp = rxBuf[6] - 50.0;
+      ctemp = rxBuf[4] - 50.0;
       soc = (rxBuf[0] - 10) / 2.0;
       soclevel = soc;
       celltemp = ctemp;
-      Serial.println(rxBuf[6]);
-      Serial.println(rxBuf[5]);
-      Serial.println(ctemp);
-      Serial.println(celltemp);
     }
     if (rxId2 == 0x286) {
       for (byte i = 0; i < 7; i++) {
