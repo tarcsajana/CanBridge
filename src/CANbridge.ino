@@ -123,10 +123,10 @@ const long interval = 10000;       // Interval at which to publish sensor readin
 WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 //MQTT setup
-const char user[] = "uqctrigg";
-const char pass[] = "GqofEFGIW-Rn";
-const char broker[] = "hairdresser.cloudmqtt.com";
-int port = 15745;
+const char user[] = "xnjcqaux:xnjcqaux";
+const char pass[] = "ZvX_UPUj2x6uOH0T4ZNv3glsL7JrYEZ2";
+const char broker[] = "hawk.rmq.cloudamqp.com";
+int port = 1883;
 
 void setup() {
   Serial.begin(115200);
